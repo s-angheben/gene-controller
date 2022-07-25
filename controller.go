@@ -116,7 +116,6 @@ func load_gen_param(db *sql.DB) *Wg_params {
 
 func load_pcim_param(db *sql.DB) *Pcim_to_execute {
 	var pcim_param Pcim_to_execute
-	/*
 	   	err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
 	                                 lgn_path,alpha,iterations,
 	   			      tile_size,npc,
@@ -124,13 +123,12 @@ func load_pcim_param(db *sql.DB) *Pcim_to_execute {
 	   		        FROM pcim_to_execute
 	   		        ORDER BY priority ASC
 	   		        LIMIT 1`).Scan(
-	*/
-	err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
-                              lgn_path,alpha,iterations,
-			      tile_size,npc,
-			      cutoff,priority
-		        FROM pcim
-		        WHERE pcim_id = ? `, 210047).Scan(
+	// err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
+        //                       lgn_path,alpha,iterations,
+	// 		      tile_size,npc,
+	// 		      cutoff,priority
+	// 	        FROM pcim
+	// 	        WHERE pcim_id = ? `, 210047).Scan(
 		&pcim_param.pcim_id, &pcim_param.organism, &pcim_param.pcim_name,
 		&pcim_param.lgn_path, &pcim_param.alpha, &pcim_param.iterations,
 		&pcim_param.tile_size, &pcim_param.npc,
@@ -327,12 +325,18 @@ func main() {
 	fmt.Println(lgn, size)
 
 	var lgn_string, size_string, tile_size_string, iterations_string string
-	tile_out := "tile_out.txt"
-	freq_out := "freq_out.txt"
-	seed_out := "seed_out.txt"
+	path := "/mnt/ramdisk/" + strconv.FormatUint(pcim_param.pcim_id, 10) + "_" + pcim_param.organism + "/"
+
+	os.Mkdir(path, os.ModePerm)
+
+	tile_out := path + "tile"
+	freq_out := path + "frequency.txt"
+	seed_out := path + "seed.txt"
+
 	iterations_string = strconv.FormatUint(uint64(pcim_param.iterations), 10)
 	size_string = strconv.FormatUint(size, 10)
 	tile_size_string = strconv.FormatUint(uint64(pcim_param.tile_size), 10)
+	npc_string := strconv.FormatUint(uint64(pcim_param.npc), 10)
 	lgn_string = ""
 	for _, elem := range lgn {
 		lgn_string += strconv.FormatUint(elem, 9) + " "
@@ -342,12 +346,11 @@ func main() {
 	fmt.Println("command: ", "gene", "--lgn", lgn_string, "-s", size_string, "-t", tile_size_string, "-i", iterations_string,
 		"--tile_out", tile_out, "--freq_out", freq_out, "--seed_out", seed_out, "-n", pcim_param.npc,
 	)
-	/*
-		cmd := exec.Command("gene", "--lgn", lgn_string, "-s", size_string, "-t", tile_size_string, "-i", iterations_string,
-			"--tile_out", tile_out, "--freq_out", freq_out, "--seed_out", seed_out,
-		)
-	*/
-	cmd := exec.Command("ls")
+
+	cmd := exec.Command("gene", "--lgn", lgn_string, "-s", size_string, "-t", tile_size_string, "-i", iterations_string,
+		"--tile_out", tile_out, "--freq_out", freq_out, "--seed_out", seed_out, "-n", npc_string,
+	)
+	//	cmd := exec.Command("ls")
 	err = cmd.Start()
 	if err != nil {
 		fmt.Println(err.Error())
