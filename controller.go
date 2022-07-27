@@ -116,19 +116,19 @@ func load_gen_param(db *sql.DB) *Wg_params {
 
 func load_pcim_param(db *sql.DB) *Pcim_to_execute {
 	var pcim_param Pcim_to_execute
-	   	err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
+	err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
 	                                 lgn_path,alpha,iterations,
 	   			      tile_size,npc,
 	   			      cutoff,priority
 	   		        FROM pcim_to_execute
 	   		        ORDER BY priority ASC
 	   		        LIMIT 1`).Scan(
-	// err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
-        //                       lgn_path,alpha,iterations,
-	// 		      tile_size,npc,
-	// 		      cutoff,priority
-	// 	        FROM pcim
-	// 	        WHERE pcim_id = ? `, 210047).Scan(
+		// err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
+		//                       lgn_path,alpha,iterations,
+		// 		      tile_size,npc,
+		// 		      cutoff,priority
+		// 	        FROM pcim
+		// 	        WHERE pcim_id = ? `, 210047).Scan(
 		&pcim_param.pcim_id, &pcim_param.organism, &pcim_param.pcim_name,
 		&pcim_param.lgn_path, &pcim_param.alpha, &pcim_param.iterations,
 		&pcim_param.tile_size, &pcim_param.npc,
