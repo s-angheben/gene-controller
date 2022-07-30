@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+        "github.com/antchfx/xmlquery"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -116,19 +118,19 @@ func load_gen_param(db *sql.DB) *Wg_params {
 
 func load_pcim_param(db *sql.DB) *Pcim_to_execute {
 	var pcim_param Pcim_to_execute
-	err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
-	                                 lgn_path,alpha,iterations,
-	   			      tile_size,npc,
-	   			      cutoff,priority
-	   		        FROM pcim_to_execute
-	   		        ORDER BY priority ASC
-	   		        LIMIT 1`).Scan(
-		// err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
-		//                       lgn_path,alpha,iterations,
-		// 		      tile_size,npc,
-		// 		      cutoff,priority
-		// 	        FROM pcim
-		// 	        WHERE pcim_id = ? `, 210047).Scan(
+	// err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
+	//                                  lgn_path,alpha,iterations,
+	//    			      tile_size,npc,
+	//    			      cutoff,priority
+	//    		        FROM pcim_to_execute
+	//    		        ORDER BY priority DESC
+	//    		        LIMIT 1`).Scan(
+				err := db.QueryRow(`SELECT pcim_id,organism,pcim_name,
+		                      lgn_path,alpha,iterations,
+				      tile_size,npc,
+				      cutoff,priority
+			        FROM pcim
+			        WHERE pcim_id = ? `, 210047).Scan(
 		&pcim_param.pcim_id, &pcim_param.organism, &pcim_param.pcim_name,
 		&pcim_param.lgn_path, &pcim_param.alpha, &pcim_param.iterations,
 		&pcim_param.tile_size, &pcim_param.npc,
@@ -174,8 +176,6 @@ func load_pcim_estimate(db *sql.DB, exp_id uint64, tile_size uint, pc_alpha floa
 }
 
 // the error field is used as error in the update query
-// TODO check that all list size are the same
-// TODO CHECK SLICE
 func load_exp_file_path(db *sql.DB, exp_id uint64) ([]Exp, error) { //Exp is already a reference since it's a slice
 	var exps []Exp
 	var rows_number uint = 0
@@ -240,7 +240,7 @@ func Scan_until_comma(data []byte, atEOF bool) (advance int, token []byte, err e
 	return start, nil, nil
 }
 
-func get_lgn_probes(lgn_path string, obs_path string) ([]uint64, uint64) {
+func get_lgn_probes(lgn_path string, obs_path string) ([]uint, uint) {
 	lgn_file, err := os.Open(lgn_path)
 	if err != nil {
 		panic(err.Error())
@@ -265,15 +265,15 @@ func get_lgn_probes(lgn_path string, obs_path string) ([]uint64, uint64) {
 	obs_scanner := bufio.NewScanner(obs_file)
 	obs_scanner.Split(bufio.ScanLines)
 
-	var lgn_indexes []uint64
-	var obs_file_row uint64 = 0
+	var lgn_indexes []uint
+	var obs_file_row uint = 0
 	obs_scanner.Scan()
 	for obs_scanner.Scan() {
 		obs_file_row += 1
-		row_scanner := bufio.NewScanner(strings.NewReader(obs_scanner.Text()))
-		row_scanner.Split(Scan_until_comma)
-		row_scanner.Scan() // take the first element
-		if _, ok := lgn_map[row_scanner.Text()]; ok {
+		col_scanner := bufio.NewScanner(strings.NewReader(obs_scanner.Text()))
+		col_scanner.Split(Scan_until_comma)
+		col_scanner.Scan() // take the first element
+		if _, ok := lgn_map[col_scanner.Text()]; ok {
 			lgn_indexes = append(lgn_indexes, obs_file_row)
 		}
 	}
@@ -284,17 +284,74 @@ func get_lgn_probes(lgn_path string, obs_path string) ([]uint64, uint64) {
 	return lgn_indexes, obs_file_row
 }
 
-//number_wu = pcim(logging, str(pcim_id)+'_'+organism, pcim_name, app_name, exps_list, lgn_path, alpha, iterations, tile_size, num_pc_wu, deadline, num_cols, replication_factor, out_template, create_wu, executions_path, cutoff, pc_time*host_flops*1.6)
-//func call_pcim (pcim_param)
+func count_colls(obs_path string) (int) {
+	obs_file, err := os.Open(obs_path)
+	if err != nil {
+		panic(err.Error())
+	}
+	obs_scanner := bufio.NewScanner(obs_file)
+	obs_scanner.Split(bufio.ScanLines)
+
+	obs_scanner.Scan()
+	s := strings.Split(obs_scanner.Text(), ",")
+	obs_file.Close()
+	return len(s)
+}
+
+func save_parameters(path string, cols int, wg_param *Wg_params, pcim_param *Pcim_to_execute, pcim_estimate *Pcim_estimate) {
+	data_str := fmt.Sprint("PC-IM: ", pcim_param.pcim_name, "\n",
+		"LGN: ", pcim_param.lgn_path, "\n",
+		"alpha: ",  pcim_param.alpha, "\n",
+		"iterations: ", pcim_param.iterations, "\n",
+		"tile size: ", pcim_param.tile_size, "\n",
+		"PC x WU: ", pcim_param.npc, "\n",
+		"deadline: ", wg_param.deadline, "\n",
+		"num cols: ", cols, "\n",
+		"WU FLOP: ", pcim_estimate.pc_time*pcim_estimate.host_flops*1.6, "\n")
+	data := []byte(data_str)
+	os.WriteFile(path + "parameters.txt", data, 0644)
+}
+
+// CHECK CONFIG FILE
+func check_disabled (config_file string) bool {
+        disabled := true
+        file, err := os.Open("config.xml")
+        if err != nil {
+                return true
+        }
+        bufio.NewReader(file)
+        doc, err := xmlquery.Parse(file)
+        if err != nil {
+                return true
+        }
+
+        root := xmlquery.FindOne(doc, "//boinc")
+        for i, n := range xmlquery.Find(doc, "//daemons/daemon/cmd") {
+                if strings.Split(n.InnerText(), " ")[0] == "gene_work_generator" {
+                        if root.SelectElement("//daemons/daemon[" + strconv.Itoa(i) + "]/disabled").InnerText() == "0" {
+                                disabled = false
+                        }
+                }
+        }
+        return disabled
+}
+
 
 func main() {
 	db := init_db()
 	defer db.Close()
 
+	disabled := check_disabled("config.xml")
+	if disabled {
+		os.Exit(1)
+	}
+
+	// get_queue_com := exec.Command(../bin/gene_get_queue)
+	// val, err := get_queue_com.Output()
+
+
 	pcim_to_execute_number := load_pcim_to_execute_number(db)
 	fmt.Println("pcim to execute: ", pcim_to_execute_number)
-
-	// if (unsent_wus < cushion) and (cur.rowcount > 0):
 
 	gen_param := load_gen_param(db)
 	fmt.Println("working generator parameters: ", gen_param)
@@ -324,44 +381,63 @@ func main() {
 	lgn, size := get_lgn_probes(pcim_param.lgn_path, exps[0].path)
 	fmt.Println(lgn, size)
 
-	var lgn_string, size_string, tile_size_string, iterations_string string
+	fmt.Println("colls number:", count_colls(exps[0].path))
+	tmp := math.Ceil((float64(size-uint(len(lgn))) / float64(pcim_param.tile_size-uint(len(lgn)))))
+	number_wu := math.Ceil(tmp * float64(pcim_param.iterations) / float64(pcim_param.npc))
+	fmt.Println("wu:", math.Ceil(tmp * float64(pcim_param.iterations) / float64(pcim_param.npc)))
+	fmt.Println(size, len(lgn), pcim_param.tile_size)
+
 	path := "/mnt/ramdisk/" + strconv.FormatUint(pcim_param.pcim_id, 10) + "_" + pcim_param.organism + "/"
-
 	os.Mkdir(path, os.ModePerm)
+	save_parameters(path, count_colls(exps[0].path), gen_param, pcim_param, pcim_estimate)
 
-	tile_out := path + "tile"
-	freq_out := path + "frequency.txt"
-	seed_out := path + "seed.txt"
+	/////////////
+	var lgn_string, size_string, tile_size_string, iterations_string string
+
 
 	iterations_string = strconv.FormatUint(uint64(pcim_param.iterations), 10)
-	size_string = strconv.FormatUint(size, 10)
+	size_string = strconv.FormatUint(uint64(size), 10)
 	tile_size_string = strconv.FormatUint(uint64(pcim_param.tile_size), 10)
 	npc_string := strconv.FormatUint(uint64(pcim_param.npc), 10)
 	lgn_string = ""
 	for _, elem := range lgn {
-		lgn_string += strconv.FormatUint(elem, 9) + " "
+		lgn_string += strconv.FormatUint(uint64(elem), 10) + " "
 	}
 	fmt.Println(size_string, lgn_string)
 
 	fmt.Println("command: ", "gene", "--lgn", lgn_string, "-s", size_string, "-t", tile_size_string, "-i", iterations_string,
-		"--tile_out", tile_out, "--freq_out", freq_out, "--seed_out", seed_out, "-n", pcim_param.npc,
+		"--path", path,  "-n", npc_string,
 	)
 
 	cmd := exec.Command("gene", "--lgn", lgn_string, "-s", size_string, "-t", tile_size_string, "-i", iterations_string,
-		"--tile_out", tile_out, "--freq_out", freq_out, "--seed_out", seed_out, "-n", npc_string,
+		"--path", path,  "-n", npc_string,
 	)
-	//	cmd := exec.Command("ls")
+	// cmd := exec.Command("ls")
 	err = cmd.Start()
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
+	db.Exec(`UPDATE pcim
+	         SET in_execution = 1,
+                 number_wus = ?, time_creation = NOW()
+     		 WHERE pcim_id = ?`, number_wu, pcim_param.pcim_id)
 	fmt.Printf("%v tile_creation started with the command gene\n", time.Now().Unix())
 	go func() {
 		err = cmd.Wait()
 		fmt.Printf("Command finished with error: %v\n", err)
 		fmt.Printf("%v tile_creation finished\n", time.Now().Unix())
+
+		// sticky_f, _ := os.Create(path + "/in_sticky.txt")
+		// sticky_f.WriteString(exps[0].path)
+		// sticky_f.Close()
+
+		// CALL BOINC
+		// exec.Command('../bin/gene_make_one_wu gene_pcim 4', pcim_name, app_name, out_template, repr(time_estimation), in_sticky_path, repr(len(exps_list)), in_nosticky_path, repr(1), repr(replication_factor), repr(deadline), repr(alpha), OUTPUT, repr(col_number), repr(cut_results))
+
 	}()
+
+
 	for {
 	}
 }
